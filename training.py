@@ -7,6 +7,7 @@ from torchvision.io import read_image
 from torchvision.transforms import ToTensor
 import torch
 import torch.optim as optim
+from torch.utils.data import Dataset
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
@@ -24,7 +25,7 @@ configuration_dict = {
 classes = []
 
 
-class ClearMLDataLoader:
+class ClearMLDataLoader(Dataset):
     def __init__(self, dataset_name, project_name, folder_filter):
         clearml_dataset = Dataset.get(dataset_name=dataset_name, dataset_project=project_name)
         self.img_dir = clearml_dataset.get_local_copy()
@@ -73,13 +74,17 @@ def plot_signal(signal, title, cmap=None):
     return ToTensor()(PIL.Image.open(plot_buf))
 
 
-train_loader = ClearMLDataLoader('Subset', 'Audio Classification', set(range(1, 10)))
-test_loader = ClearMLDataLoader('Subset', 'Audio Classification', {10})
+train_dataset = ClearMLDataLoader('preprocessed dataset', 'Audio Classification', set(range(1, 10)))
+test_dataset = ClearMLDataLoader('preprocessed dataset', 'Audio Classification', {10})
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=configuration_dict.get('batch_size', 4),
+                                           shuffle=True, pin_memory=True, num_workers=1)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=configuration_dict.get('batch_size', 4),
+                                          shuffle=False, pin_memory=False, num_workers=1)
 
 
 def train(model, epoch):
     model.train()
-    for batch_idx, (sounds, sample_rate, inputs, labels) in enumerate(train_loader):
+    for batch_idx, (inputs, labels) in enumerate(train_loader):
         inputs = inputs.to(device)
         labels = labels.to(device)
 
@@ -96,7 +101,7 @@ def train(model, epoch):
         iteration = epoch * len(train_loader) + batch_idx
         if batch_idx % log_interval == 0:  # print training stats
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'
-                  .format(epoch, batch_idx * len(inputs), len(train_loader.dataset),
+                  .format(epoch, batch_idx * len(inputs), len(train_loader),
                           100. * batch_idx / len(train_loader), loss))
             tensorboard_writer.add_scalar('training loss/loss', loss, iteration)
             tensorboard_writer.add_scalar('learning rate/lr', optimizer.param_groups[0]['lr'], iteration)
@@ -113,7 +118,7 @@ def test(model, epoch):
     class_correct = list(0. for i in range(len(classes)))
     class_total = list(0. for i in range(len(classes)))
     with torch.no_grad():
-        for idx, (sounds, sample_rate, inputs, labels) in enumerate(test_loader):
+        for idx, (inputs, labels) in enumerate(test_loader):
             inputs = inputs.to(device)
             labels = labels.to(device)
 

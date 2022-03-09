@@ -79,8 +79,7 @@ class DataSetBuilder:
         # Get only the filename and replace the extention, we're saving an image here
         new_file_name = os.path.basename(audio_file_path).replace('.wav', '.jpg')
         # Get the correct folder, basically the original dataset folder + the new filename
-        spectrogram_folder = self.original_dataset_path / os.path.dirname(audio_file_path)
-        spectrogram_path = spectrogram_folder / new_file_name
+        spectrogram_path = self.original_dataset_path / os.path.dirname(audio_file_path) / new_file_name
         # Convert the spectrogram to an image and save it to the path we made above
         Image.fromarray(spectrogram).convert('RGB').save(open(spectrogram_path, 'wb'))
         return spectrogram_path
