@@ -11,6 +11,8 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 from clearml import Task, Dataset
+task = Task.init(project_name='Audio Classification',
+                 task_name='training')
 
 configuration_dict = {
     'dropout': 0.25,
@@ -23,16 +25,17 @@ classes = []
 
 
 class ClearMLDataLoader:
-    def __init__(self, dataset_name, project_name):
+    def __init__(self, dataset_name, project_name, folder_filter):
         clearml_dataset = Dataset.get(dataset_name=dataset_name, dataset_project=project_name)
         self.img_dir = clearml_dataset.get_local_copy()
-        self.img_metadata = Task.get(id=clearml_dataset.id).artifacts['metadata'].get()
+        self.img_metadata = Task.get_task(task_id=clearml_dataset.id).artifacts['metadata'].get()
+        self.img_metadata = self.img_metadata[self.img_metadata['fold'].isin(folder_filter)]
 
     def __len__(self):
         return len(self.img_metadata)
 
     def __getitem__(self, idx):
-        img_path = os.path.join(self.img_dir, self.img_metadata.loc[idx, 'filepath'])
+        img_path = os.path.join(self.img_dir, self.img_metadata.loc[idx, 'filepath']).replace('.wav', '.jpg')
         image = read_image(img_path)
         label = self.img_metadata.loc[idx, 'label']
         return image, label
@@ -68,6 +71,10 @@ def plot_signal(signal, title, cmap=None):
     plot_buf.seek(0)
     plt.close(fig)
     return ToTensor()(PIL.Image.open(plot_buf))
+
+
+train_loader = ClearMLDataLoader('Subset', 'Audio Classification', set(range(1, 10)))
+test_loader = ClearMLDataLoader('Subset', 'Audio Classification', {10})
 
 
 def train(model, epoch):

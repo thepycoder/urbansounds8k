@@ -15,24 +15,12 @@ from clearml.storage import StorageManager
 from clearml import Task, Dataset
 
 task = Task.init(project_name='Audio Classification',
-                 task_name='preprocessing example')
+                 task_name='preprocessing')
 
 # Let's preprocess the data and create a new ClearML dataset from it, so we can track it around
 # The cool thing is, we can easily debug, by using, you guessed it: debug samples! We can log both
 # the original sound and it's processed mel spectrogram as debug samples, so we can manually check
 # if everything went as planned.
-
-
-def get_urbansound8k():
-    # Download UrbanSound8K dataset (https://urbansounddataset.weebly.com/urbansound8k.html)
-    # For simplicity we will use here a subset of that dataset using clearml StorageManager
-    path_to_urbansound8k = StorageManager.get_local_copy(
-        "https://allegro-datasets.s3.amazonaws.com/clearml/UrbanSound8K.zip",
-        extract_archive=True)
-    path_to_urbansound8k_csv = Path(path_to_urbansound8k) / 'UrbanSound8K' / 'metadata' / 'UrbanSound8K.csv'
-    path_to_urbansound8k_audio = Path(path_to_urbansound8k) / 'UrbanSound8K' / 'audio'
-
-    return path_to_urbansound8k_csv, path_to_urbansound8k_audio
 
 
 class PreProcessor:
@@ -73,40 +61,27 @@ class PreProcessor:
 class DataSetBuilder:
     def __init__(self):
         self.configuration = {
-            'selected_classes': ['air_conditioner', 'car_horn', 'children_playing', 'dog_bark', 'drilling',
-                                 'engine_idling', 'gun_shot', 'jackhammer', 'siren', 'street_music'],
-            'preprocessed_dataset_path': '/tmp/preprocessed_dataset'
+            'dataset_path': 'dataset'
         }
         task.connect(self.configuration)
 
-        self.path_to_urbansound8k_csv, self.path_to_urbansound8k_audio = get_urbansound8k()
-        self.urbansound8k_metadata = pd.read_csv(self.path_to_urbansound8k_csv)
-        # Subset the data to only include the classes we want
-        self.urbansound8k_metadata = \
-            self.urbansound8k_metadata[self.urbansound8k_metadata['class'].isin(self.configuration['selected_classes'])]
+        self.original_dataset = Dataset.get(dataset_project='Audio Classification', dataset_name='original dataset')
+        # This will return the pandas dataframe we added in the previous task
+        self.metadata = Task.get_task(task_id=self.original_dataset.id).artifacts['metadata'].get()
+        # This will download the data and return a local path to the data
+        self.original_dataset_path = \
+            Path(self.original_dataset.get_mutable_local_copy(self.configuration['dataset_path']))
 
-        self.metadata = pd.DataFrame({
-            'filepath': ('fold' + self.urbansound8k_metadata.loc[:, 'fold'].astype(str)
-                         + '/' + self.urbansound8k_metadata.loc[:, 'slice_file_name'].astype(str)),
-            'label': self.urbansound8k_metadata.loc[:, 'classID']
-        })
-
+        # Prepare a preprocessor that will handle each sample one by one
         self.preprocessor = PreProcessor()
-        # Always make sure the to-create dataset path is empty, so we don't end up with parts of a previous dataset
-        self.clean_preprocessed_dataset_path()
-
-    def clean_preprocessed_dataset_path(self):
-        preprocessed_dataset_path = Path(self.configuration['preprocessed_dataset_path'])
-        if os.path.exists(preprocessed_dataset_path):
-            shutil.rmtree(preprocessed_dataset_path)
 
     def store_locally(self, spectrogram, audio_file_path):
-        new_file_name = f'{os.path.basename(audio_file_path)}.jpg'
-        spectrogram_folder = Path(self.configuration['preprocessed_dataset_path']) / os.path.dirname(audio_file_path)
-        # Create the folder if it doesn't exist already
-        os.makedirs(spectrogram_folder, exist_ok=True)
-        # Save the spectrogram to a similar folder structure as the original data
+        # Get only the filename and replace the extention, we're saving an image here
+        new_file_name = os.path.basename(audio_file_path).replace('.wav', '.jpg')
+        # Get the correct folder, basically the original dataset folder + the new filename
+        spectrogram_folder = self.original_dataset_path / os.path.dirname(audio_file_path)
         spectrogram_path = spectrogram_folder / new_file_name
+        # Convert the spectrogram to an image and save it to the path we made above
         Image.fromarray(spectrogram).convert('RGB').save(open(spectrogram_path, 'wb'))
         return spectrogram_path
 
@@ -115,46 +90,57 @@ class DataSetBuilder:
         dataset_task.get_logger().report_table(
             title='Raw Dataset Metadata',
             series='Raw Dataset Metadata',
-            table_plot=self.urbansound8k_metadata
+            table_plot=self.metadata
         )
         dataset_task.get_logger().report_histogram(
             title='Class distribution',
             series='Class distribution',
-            values=self.urbansound8k_metadata['class'],
+            values=self.metadata['class'],
             iteration=0,
             xaxis='X axis label',
             yaxis='Y axis label'
         )
 
     def build_dataset(self):
+        # Let's create a new dataset that is a child of the original one
+        # We'll add the preprocessed samples to the original dataset, leading to a new version
+        # Providing the parent dataset allows us to keep a clear lineage of our data
         dataset = Dataset.create(
-            dataset_name='Subset',
-            dataset_project='Audio Classification'
+            dataset_name='preprocessed dataset',
+            dataset_project='Audio Classification',
+            parent_datasets=[self.original_dataset.id]
         )
         dataset_task = Task.get_task(dataset.id)
-        # loop through the csv entries and only add entries from folders in the folder list
-        for _, data in tqdm(self.metadata.iterrows()):
-            audio_file_path, label = data.tolist()
-            sample, sample_freq = torchaudio.load(self.path_to_urbansound8k_audio / audio_file_path, normalize=True)
+
+        # loop through the metadata entries and preprocess each sample, then add some of them as debug samples to
+        # manually double check in the UI that everything has worked (you can watch the spectrogram and listen to the
+        # audio side by side in the debug sample UI)
+        for i, (_, data) in tqdm(enumerate(self.metadata.iterrows())):
+            _, audio_file_path, label = data.tolist()
+            sample, sample_freq = torchaudio.load(self.original_dataset_path / audio_file_path, normalize=True)
             spectrogram = self.preprocessor.preprocess_sample(sample, sample_freq)
             colored_spectrogram_image = np.uint8(cm.gist_earth(spectrogram.squeeze().numpy())*255)
             path_to_spectrogram = self.store_locally(colored_spectrogram_image, audio_file_path)
 
-            dataset_task.get_logger().report_media(
-                title=os.path.basename(audio_file_path),
-                series='spectrogram',
-                local_path=str(path_to_spectrogram)
-            )
-            dataset_task.get_logger().report_media(
-                title=os.path.basename(audio_file_path),
-                series='original_audio',
-                local_path=self.path_to_urbansound8k_audio / audio_file_path
-            )
-        dataset.add_files(self.configuration['preprocessed_dataset_path'])
+            # Log every 10th sample as a debug sample to the UI, so we can manually check it
+            if i % 10 == 0:
+                dataset_task.get_logger().report_media(
+                    title=os.path.basename(audio_file_path),
+                    series='spectrogram',
+                    local_path=str(path_to_spectrogram)
+                )
+                dataset_task.get_logger().report_media(
+                    title=os.path.basename(audio_file_path),
+                    series='original_audio',
+                    local_path=self.original_dataset_path / audio_file_path
+                )
+        # The orininal data path will now also have the spectrograms iin its filetree.
+        # So that's why we add it here to fill up the new dataset with.
+        dataset.add_files(self.original_dataset_path)
+        # We still want the metadata
         dataset_task.upload_artifact(name='metadata', artifact_object=self.metadata)
         dataset.finalize(auto_upload=True)
         dataset_task.flush(wait_for_uploads=True)
-        self.log_dataset_statistics(dataset_task)
 
 
 if __name__ == '__main__':
