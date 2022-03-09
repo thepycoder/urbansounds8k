@@ -1,5 +1,6 @@
 import os.path
 from pathlib import Path
+import io
 
 from PIL import Image
 from matplotlib import cm
@@ -70,19 +71,10 @@ class DataSetBuilder:
         self.metadata = Task.get_task(task_id=self.original_dataset.id).artifacts['metadata'].get()
         # This will download the data and return a local path to the data
         self.original_dataset_path = \
-            Path(self.original_dataset.get_mutable_local_copy(self.configuration['dataset_path']))
+            Path(self.original_dataset.get_mutable_local_copy(self.configuration['dataset_path'], overwrite=True))
 
         # Prepare a preprocessor that will handle each sample one by one
         self.preprocessor = PreProcessor()
-
-    def store_locally(self, spectrogram, audio_file_path):
-        # Get only the filename and replace the extention, we're saving an image here
-        new_file_name = os.path.basename(audio_file_path).replace('.wav', '.jpg')
-        # Get the correct folder, basically the original dataset folder + the new filename
-        spectrogram_path = self.original_dataset_path / os.path.dirname(audio_file_path) / new_file_name
-        # Convert the spectrogram to an image and save it to the path we made above
-        Image.fromarray(spectrogram).convert('RGB').save(open(spectrogram_path, 'wb'))
-        return spectrogram_path
 
     def log_dataset_statistics(self, dataset_task):
         print('logging table and histogram')
@@ -118,22 +110,34 @@ class DataSetBuilder:
             _, audio_file_path, label = data.tolist()
             sample, sample_freq = torchaudio.load(self.original_dataset_path / audio_file_path, normalize=True)
             spectrogram = self.preprocessor.preprocess_sample(sample, sample_freq)
-            colored_spectrogram_image = np.uint8(cm.gist_earth(spectrogram.squeeze().numpy())*255)
-            path_to_spectrogram = self.store_locally(colored_spectrogram_image, audio_file_path)
+            # Get only the filename and replace the extension, we're saving an image here
+            new_file_name = os.path.basename(audio_file_path).replace('.wav', '.npy')
+            # Get the correct folder, basically the original dataset folder + the new filename
+            spectrogram_path = self.original_dataset_path / os.path.dirname(audio_file_path) / new_file_name
+            # Save the numpy array to disk
+            np.save(spectrogram_path, spectrogram)
 
             # Log every 10th sample as a debug sample to the UI, so we can manually check it
             if i % 10 == 0:
+                # Convert the numpy array to a viewable JPEG
+                np_spectrogram_image = np.uint8(cm.gist_earth(spectrogram.squeeze().numpy()) * 255)
+                spectrogram_image = Image.fromarray(np_spectrogram_image).convert('RGB')
+                buf = io.BytesIO()
+                spectrogram_image.save(buf, format='JPEG')
+
+                # Report that jpeg and the original sound, so they can be viewed side by side
                 dataset_task.get_logger().report_media(
                     title=os.path.basename(audio_file_path),
                     series='spectrogram',
-                    local_path=str(path_to_spectrogram)
+                    stream=buf,
+                    file_extension='jpg'
                 )
                 dataset_task.get_logger().report_media(
                     title=os.path.basename(audio_file_path),
                     series='original_audio',
                     local_path=self.original_dataset_path / audio_file_path
                 )
-        # The orininal data path will now also have the spectrograms iin its filetree.
+        # The original data path will now also have the spectrograms in its filetree.
         # So that's why we add it here to fill up the new dataset with.
         dataset.add_files(self.original_dataset_path)
         # We still want the metadata

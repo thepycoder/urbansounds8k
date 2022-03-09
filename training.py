@@ -5,11 +5,13 @@ import matplotlib.pyplot as plt
 from torchvision import models
 from torchvision.io import read_image
 from torchvision.transforms import ToTensor
+import torchaudio
 import torch
 import torch.optim as optim
 from torch.utils.data import Dataset
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
+import numpy as np
 
 from clearml import Task, Dataset
 task = Task.init(project_name='Audio Classification',
@@ -20,9 +22,7 @@ configuration_dict = {
     'base_lr': 0.001,
     'number_of_epochs': 10
 }
-
-# Get this from the preprocessing task!
-classes = []
+task.connect(configuration_dict)
 
 
 class ClearMLDataLoader(Dataset):
@@ -31,15 +31,32 @@ class ClearMLDataLoader(Dataset):
         self.img_dir = clearml_dataset.get_local_copy()
         self.img_metadata = Task.get_task(task_id=clearml_dataset.id).artifacts['metadata'].get()
         self.img_metadata = self.img_metadata[self.img_metadata['fold'].isin(folder_filter)]
+        # We just removed some rows by filtering on class, this will make gaps in the dataframe index
+        # (e.g. 57 won't exist anymore) so we reindex to make it a full range again, otherwise we'll get errors later
+        # when selecting a row by index
+        self.img_metadata = self.img_metadata.reset_index(drop=True)
 
     def __len__(self):
         return len(self.img_metadata)
 
     def __getitem__(self, idx):
-        img_path = os.path.join(self.img_dir, self.img_metadata.loc[idx, 'filepath']).replace('.wav', '.jpg')
-        image = read_image(img_path)
+        sound_path = os.path.join(self.img_dir, self.img_metadata.loc[idx, 'filepath'])
+        img_path = sound_path.replace('.wav', '.npy')
+        image = np.load(img_path)
         label = self.img_metadata.loc[idx, 'label']
-        return image, label
+        return sound_path, image, label
+
+
+train_dataset = ClearMLDataLoader('preprocessed dataset', 'Audio Classification', set(range(1, 10)))
+test_dataset = ClearMLDataLoader('preprocessed dataset', 'Audio Classification', {10})
+print(len(train_dataset), len(test_dataset))
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=configuration_dict.get('batch_size', 4),
+                                           shuffle=True, pin_memory=True, num_workers=1)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=configuration_dict.get('batch_size', 4),
+                                          shuffle=False, pin_memory=False, num_workers=1)
+
+classes = ['air_conditioner', 'car_horn', 'children_playing', 'dog_bark', 'drilling',
+           'engine_idling', 'gun_shot', 'jackhammer', 'siren', 'street_music']
 
 
 model = models.resnet18(pretrained=True)
@@ -74,17 +91,9 @@ def plot_signal(signal, title, cmap=None):
     return ToTensor()(PIL.Image.open(plot_buf))
 
 
-train_dataset = ClearMLDataLoader('preprocessed dataset', 'Audio Classification', set(range(1, 10)))
-test_dataset = ClearMLDataLoader('preprocessed dataset', 'Audio Classification', {10})
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=configuration_dict.get('batch_size', 4),
-                                           shuffle=True, pin_memory=True, num_workers=1)
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=configuration_dict.get('batch_size', 4),
-                                          shuffle=False, pin_memory=False, num_workers=1)
-
-
 def train(model, epoch):
     model.train()
-    for batch_idx, (inputs, labels) in enumerate(train_loader):
+    for batch_idx, (_, inputs, labels) in enumerate(train_loader):
         inputs = inputs.to(device)
         labels = labels.to(device)
 
@@ -118,7 +127,7 @@ def test(model, epoch):
     class_correct = list(0. for i in range(len(classes)))
     class_total = list(0. for i in range(len(classes)))
     with torch.no_grad():
-        for idx, (inputs, labels) in enumerate(test_loader):
+        for idx, (sound_paths, inputs, labels) in enumerate(test_loader):
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -133,10 +142,11 @@ def test(model, epoch):
 
             iteration = (epoch + 1) * len(train_loader)
             if idx % debug_interval == 0:  # report debug image every "debug_interval" mini-batches
-                for n, (sound, inp, pred, label) in enumerate(zip(sounds, inputs, predicted, labels)):
+                for n, (sound_path, inp, pred, label) in enumerate(zip(sound_paths, inputs, predicted, labels)):
+                    sound, sample_rate = torchaudio.load(sound_path, normalize=True)
                     series = 'label_{}_pred_{}'.format(classes[label.cpu()], classes[pred.cpu()])
                     tensorboard_writer.add_audio('Test audio samples/{}_{}_{}'.format(idx, n, series),
-                                                 sound, iteration, int(sample_rate[n]))
+                                                 sound.reshape(1, -1), iteration, int(sample_rate))
                     tensorboard_writer.add_image('Test MelSpectrogram samples/{}_{}_{}'.format(idx, n, series),
                                                  plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), iteration)
 
