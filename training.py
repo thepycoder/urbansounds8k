@@ -3,7 +3,7 @@ import io
 import os
 import matplotlib.pyplot as plt
 from torchvision import models
-from torchvision.io import read_image
+from sklearn.metrics import ConfusionMatrixDisplay, f1_score
 from torchvision.transforms import ToTensor
 import torchaudio
 import torch
@@ -124,8 +124,8 @@ def train(model, epoch):
 
 def test(model, epoch):
     model.eval()
-    class_correct = list(0. for i in range(len(classes)))
-    class_total = list(0. for i in range(len(classes)))
+    all_predictions = []
+    all_labels = []
     with torch.no_grad():
         for idx, (sound_paths, inputs, labels) in enumerate(test_loader):
             inputs = inputs.to(device)
@@ -134,14 +134,13 @@ def test(model, epoch):
             outputs = model(inputs)
 
             _, predicted = torch.max(outputs, 1)
-            c = (predicted == labels)
-            for i in range(len(inputs)):
-                label = labels[i].item()
-                class_correct[label] += c[i].item()
-                class_total[label] += 1
+            for pred, label in zip(predicted.cpu(), labels.cpu()):
+                all_predictions.append(int(pred))
+                all_labels.append(int(label))
 
             iteration = (epoch + 1) * len(train_loader)
             if idx % debug_interval == 0:  # report debug image every "debug_interval" mini-batches
+
                 for n, (sound_path, inp, pred, label) in enumerate(zip(sound_paths, inputs, predicted, labels)):
                     sound, sample_rate = torchaudio.load(sound_path, normalize=True)
                     series = 'label_{}_pred_{}'.format(classes[label.cpu()], classes[pred.cpu()])
@@ -150,9 +149,9 @@ def test(model, epoch):
                     tensorboard_writer.add_image('Test MelSpectrogram samples/{}_{}_{}'.format(idx, n, series),
                                                  plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), iteration)
 
-    total_accuracy = 100 * sum(class_correct) / sum(class_total)
-    print('[Iteration {}] Accuracy on the {} test images: {}%\n'.format(epoch, sum(class_total), total_accuracy))
-    tensorboard_writer.add_scalar('accuracy/total', total_accuracy, iteration)
+    tensorboard_writer.add_scalar('f1_score/total',
+                                  f1_score(all_labels, all_predictions, average='weighted'), iteration)
+    ConfusionMatrixDisplay.from_predictions(all_labels, all_predictions)
 
 
 log_interval = 10
