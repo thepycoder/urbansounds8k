@@ -14,7 +14,7 @@ task = Task.init(project_name='Audio Classification',
 
 # Let's preprocess the data and create a new ClearML dataset from it, so we can track it around
 # The cool thing is, we can easily debug, by using, you guessed it: debug samples! We can log both
-# the original sound and it's processed mel spectrogram as debug samples, so we can manually check
+# the original sound and its processed mel spectrogram as debug samples, so we can manually check
 # if everything went as planned.
 
 
