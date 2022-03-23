@@ -2,17 +2,11 @@ import os.path
 from pathlib import Path
 import io
 
-from PIL import Image
-from matplotlib import cm
+import matplotlib as mpl
 import numpy as np
 from tqdm import tqdm
-import pandas as pd
 import torchaudio
 import torch
-import shutil
-import time
-
-from clearml.storage import StorageManager
 from clearml import Task, Dataset
 
 task = Task.init(project_name='Audio Classification',
@@ -120,20 +114,17 @@ class DataSetBuilder:
             # Log every 10th sample as a debug sample to the UI, so we can manually check it
             if i % 10 == 0:
                 # Convert the numpy array to a viewable JPEG
-                np_spectrogram_image = np.uint8(cm.gist_earth(spectrogram.squeeze().numpy()) * 255)
-                spectrogram_image = Image.fromarray(np_spectrogram_image).convert('RGB')
-                buf = io.BytesIO()
-                spectrogram_image.save(buf, format='JPEG')
+                rgb_image = mpl.colormaps['viridis'](spectrogram[0, :, :].detach().numpy() * 255)[:, :, :3]
+                title = os.path.splitext(os.path.basename(audio_file_path))[0]
 
-                # Report that jpeg and the original sound, so they can be viewed side by side
-                dataset_task.get_logger().report_media(
-                    title=os.path.basename(audio_file_path),
+                # Report the image and the original sound, so they can be viewed side by side
+                dataset_task.get_logger().report_image(
+                    title=title,
                     series='spectrogram',
-                    stream=buf,
-                    file_extension='jpg'
+                    image=rgb_image
                 )
                 dataset_task.get_logger().report_media(
-                    title=os.path.basename(audio_file_path),
+                    title=title,
                     series='original_audio',
                     local_path=self.original_dataset_path / audio_file_path
                 )
