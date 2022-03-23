@@ -25,6 +25,7 @@ def get_urbansound8k():
 
 
 def log_dataset_statistics(dataset_task, metadata):
+    histogram_data = metadata['class'].value_counts()
     dataset_task.get_logger().report_table(
         title='Raw Dataset Metadata',
         series='Raw Dataset Metadata',
@@ -33,10 +34,10 @@ def log_dataset_statistics(dataset_task, metadata):
     dataset_task.get_logger().report_histogram(
         title='Class distribution',
         series='Class distribution',
-        values=metadata['class'],
+        values=histogram_data,
         iteration=0,
-        xaxis='X axis label',
-        yaxis='Y axis label'
+        xlabels=histogram_data.index.tolist(),
+        yaxis='Amount of samples'
     )
 
 
@@ -47,6 +48,11 @@ def build_clearml_dataset():
     # Subset the data to only include the classes we want
     urbansound8k_metadata = \
         urbansound8k_metadata[urbansound8k_metadata['class'].isin(configuration['selected_classes'])]
+
+    # TODO: Create train and test folders based on labels and folds
+    # for each sample, we check in which fold it is and which label it has
+    # then we move it there?
+
     # Create a pandas dataframe containing labels and other info we need later (fold is for train test split)
     metadata = pd.DataFrame({
         'fold': urbansound8k_metadata.loc[:, 'fold'],
@@ -61,12 +67,16 @@ def build_clearml_dataset():
         dataset_name='original dataset',
         dataset_project='Audio Classification'
     )
+    # TODO: confusing naming
+    # TODO: Add add_metadata to SDK as a wrapperish for upload_artifact
     # A dataset is a task like any other, so we can add plots and artifacts etc. to it. But to do that we need to get
     # the underlying task object first.
     dataset_task = Task.get_task(task_id=dataset.id)
     # Add the local files we downloaded earlier
     dataset.add_files(path_to_urbansound8k_audio)
     # Add the metadata in pandas format, we can now see it in the webUI and have it be easily accessible
+    # TODO: change this to dataset.upload_metadata, only sectioning will have a prefix on the artifact
+    # Also need get_metadata which will work with this prefix
     dataset_task.upload_artifact(name='metadata', artifact_object=metadata)
     # Finalize and upload the data and labels of the dataset
     dataset.finalize(auto_upload=True)
