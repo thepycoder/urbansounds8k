@@ -18,9 +18,10 @@ task = Task.init(project_name='Audio Classification',
                  task_name='training')
 
 configuration_dict = {
-    'dropout': 0.25,
-    'base_lr': 0.001,
-    'number_of_epochs': 10
+    'dropout': 0.30,
+    'base_lr': 0.002,
+    'number_of_epochs': 10,
+    'batch_size': 4
 }
 task.connect(configuration_dict)
 
@@ -122,7 +123,7 @@ def train(model, epoch):
                                              plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), iteration)
 
 
-def test(model, epoch):
+def test_model(model, epoch):
     model.eval()
     all_predictions = []
     all_labels = []
@@ -158,5 +159,5 @@ log_interval = 10
 debug_interval = 25
 for epoch in range(configuration_dict.get('number_of_epochs', 10)):
     train(model, epoch)
-    test(model, epoch)
+    test_model(model, epoch)
     scheduler.step()
