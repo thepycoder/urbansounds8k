@@ -2,3 +2,4 @@ tensorboard_logs
 .venv
 dataset
 .idea
+full_dataset

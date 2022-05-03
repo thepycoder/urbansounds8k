@@ -4,12 +4,16 @@ from clearml import Task, Dataset, StorageManager
 
 import global_config
 
-task = Task.init(project_name=global_config.PROJECT_NAME,
-                 task_name='download data')
+task = Task.init(
+    project_name=global_config.PROJECT_NAME,
+    task_name='download data',
+    task_type='data_processing'
+)
 
 configuration = {
     'selected_classes': ['air_conditioner', 'car_horn', 'children_playing', 'dog_bark', 'drilling',
-                         'engine_idling', 'gun_shot', 'jackhammer', 'siren', 'street_music']
+                         'engine_idling', 'gun_shot', 'jackhammer', 'siren', 'street_music'],
+    'dataset_tag': 'full dataset'
 }
 task.connect(configuration)
 
@@ -17,9 +21,12 @@ task.connect(configuration)
 def get_urbansound8k():
     # Download UrbanSound8K dataset (https://urbansounddataset.weebly.com/urbansound8k.html)
     # For simplicity we will use here a subset of that dataset using clearml StorageManager
-    path_to_urbansound8k = StorageManager.get_local_copy(
-        "https://allegro-datasets.s3.amazonaws.com/clearml/UrbanSound8K.zip",
-        extract_archive=True)
+    if configuration['dataset_tag'] == 'subset':
+        path_to_urbansound8k = StorageManager.get_local_copy(
+            "https://allegro-datasets.s3.amazonaws.com/clearml/UrbanSound8K.zip",
+            extract_archive=True)
+    else:
+        path_to_urbansound8k = Path('/home/victor/Projects/clearML/urbansounds/full_dataset/')
     path_to_urbansound8k_csv = Path(path_to_urbansound8k) / 'UrbanSound8K' / 'metadata' / 'UrbanSound8K.csv'
     path_to_urbansound8k_audio = Path(path_to_urbansound8k) / 'UrbanSound8K' / 'audio'
 
@@ -67,17 +74,18 @@ def build_clearml_dataset():
     # in other tasks as well as on different machines
     dataset = Dataset.create(
         dataset_name='original dataset',
-        dataset_project=global_config.PROJECT_NAME
+        dataset_project=global_config.PROJECT_NAME,
+        dataset_tags=[configuration['dataset_tag']]
     )
     # TODO: confusing naming
     # TODO: Add add_metadata to SDK as a wrapperish for upload_artifact
-    # A dataset is a task like any other, so we can add plots and artifacts etc. to it. But to do that we need to get
-    # the underlying task object first.
-    dataset_task = Task.get_task(task_id=dataset.id)
     # Add the local files we downloaded earlier
     dataset.add_files(path_to_urbansound8k_audio)
     # Add the metadata in pandas format, we can now see it in the webUI and have it be easily accessible
     # TODO: change this to dataset.upload_metadata, only sectioning will have a prefix on the artifact
+    # A dataset is a task like any other, so we can add plots and artifacts etc. to it. But to do that we need to get
+    # the underlying task object first.
+    dataset_task = Task.get_task(task_id=dataset.id)
     # Also need get_metadata which will work with this prefix
     dataset_task.upload_artifact(name='metadata', artifact_object=metadata)
     # Finalize and upload the data and labels of the dataset

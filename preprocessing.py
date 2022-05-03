@@ -58,11 +58,16 @@ class PreProcessor:
 class DataSetBuilder:
     def __init__(self):
         self.configuration = {
-            'dataset_path': 'dataset'
+            'dataset_path': 'dataset',
+            'dataset_tag': 'full dataset'
         }
         task.connect(self.configuration)
 
-        self.original_dataset = Dataset.get(dataset_project=global_config.PROJECT_NAME, dataset_name='original dataset')
+        self.original_dataset = Dataset.get(
+            dataset_project=global_config.PROJECT_NAME,
+            dataset_name='original dataset',
+            dataset_tags=[self.configuration['dataset_tag']]
+        )
         # This will return the pandas dataframe we added in the previous task
         self.metadata = Task.get_task(task_id=self.original_dataset.id).artifacts['metadata'].get()
         # This will download the data and return a local path to the data
@@ -95,7 +100,8 @@ class DataSetBuilder:
         dataset = Dataset.create(
             dataset_name='preprocessed dataset',
             dataset_project=global_config.PROJECT_NAME,
-            parent_datasets=[self.original_dataset.id]
+            parent_datasets=[self.original_dataset.id],
+            dataset_tags=[self.configuration['dataset_tag']]
         )
         dataset_task = Task.get_task(dataset.id)
 

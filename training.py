@@ -1,3 +1,5 @@
+import sys
+
 import PIL
 import io
 import os
@@ -12,6 +14,7 @@ from torch.utils.data import Dataset
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
+import random
 
 from clearml import Task, Dataset
 
@@ -24,19 +27,29 @@ task = Task.init(
 )
 
 configuration_dict = {
-    'dropout': 0.30,
+    'dropout': 0.15,
     'base_lr': 0.002,
-    'number_of_epochs': 50,
-    'training_batch_size': 20,
-    'testing_batch_size': 50,
-    'dataset_id': '09367aef2a2b4f25a494166212a4e744'
+    'number_of_epochs': 10,
+    'training_batch_size': 64,
+    'testing_batch_size': 64,
+    'dataset_id': '6b7fa258482c4dcd9262e62f41af6c98',
+    'seed': 1337
 }
 task.connect(configuration_dict)
+
+# Set ALL the necessary seeds AND if using GPU we need to set it to use deterministic algorithms
+random.seed(configuration_dict['seed'])
+np.random.seed(configuration_dict['seed'])
+torch.manual_seed(configuration_dict['seed'])
+torch.cuda.manual_seed_all(configuration_dict['seed'])
+os.environ['CUBLAS_WORKSPACE_CONFIG'] = ":4096:8"
+torch.use_deterministic_algorithms(True)
 
 
 class ClearMLDataSet(Dataset):
     def __init__(self, folder_filter):
         clearml_dataset = Dataset.get(configuration_dict['dataset_id'])
+        task.add_tags(clearml_dataset.tags)
         self.img_dir = clearml_dataset.get_local_copy()
         self.img_metadata = Task.get_task(task_id=clearml_dataset.id).artifacts['metadata'].get()
         self.img_metadata = self.img_metadata[self.img_metadata['fold'].isin(folder_filter)]
@@ -60,9 +73,9 @@ train_dataset = ClearMLDataSet(set(range(1, 10)))
 test_dataset = ClearMLDataSet({10})
 print(len(train_dataset), len(test_dataset))
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=configuration_dict.get('training_batch_size', 4),
-                                           shuffle=True, pin_memory=True, num_workers=1)
+                                           shuffle=True, pin_memory=True, num_workers=0)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=configuration_dict.get('testing_batch_size', 20),
-                                          shuffle=False, pin_memory=False, num_workers=1)
+                                          shuffle=False, pin_memory=False, num_workers=0)
 
 classes = ['air_conditioner', 'car_horn', 'children_playing', 'dog_bark', 'drilling',
            'engine_idling', 'gun_shot', 'jackhammer', 'siren', 'street_music']
@@ -85,6 +98,7 @@ model.to(device)
 tensorboard_writer = SummaryWriter('./tensorboard_logs')
 
 
+# @profile
 def plot_signal(signal, title, cmap=None):
     fig = plt.figure()
     if signal.ndim == 1:
@@ -100,6 +114,7 @@ def plot_signal(signal, title, cmap=None):
     return ToTensor()(PIL.Image.open(plot_buf))
 
 
+# @profile
 def train(model, epoch):
     model.train()
     for batch_idx, (_, inputs, labels) in enumerate(train_loader):
@@ -116,18 +131,19 @@ def train(model, epoch):
         loss.backward()
         optimizer.step()
 
-        if epoch % log_interval == 0:  # print training stats
+        iteration = epoch * len(train_loader) + batch_idx
+        if iteration % log_interval == 0:  # print training stats
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'
                   .format(epoch, batch_idx, len(train_loader),
                           100. * batch_idx / len(train_loader), loss))
-            tensorboard_writer.add_scalar('training loss/loss', loss, epoch)
-            tensorboard_writer.add_scalar('learning rate/lr', optimizer.param_groups[0]['lr'], epoch)
+            tensorboard_writer.add_scalar('training loss/loss', loss, iteration)
+            tensorboard_writer.add_scalar('learning rate/lr', optimizer.param_groups[0]['lr'], iteration)
 
-        if epoch % debug_interval == 0:  # report debug image every "debug_interval" mini-batches
-            for n, (inp, pred, label) in enumerate(zip(inputs, predicted, labels)):
+        if iteration % debug_interval == 0:  # report debug image every "debug_interval" mini-batches
+            for n, (inp, pred, label) in enumerate(zip(inputs[:10], predicted[:10], labels[:10])):
                 series = 'label_{}_pred_{}'.format(classes[label.cpu()], classes[pred.cpu()])
                 tensorboard_writer.add_image('Train MelSpectrogram samples/{}_{}_{}'.format(batch_idx, n, series),
-                                             plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), epoch)
+                                             plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), iteration)
 
 
 def test_model(model, epoch):
@@ -146,15 +162,15 @@ def test_model(model, epoch):
                 all_predictions.append(int(pred))
                 all_labels.append(int(label))
 
-            if epoch % debug_interval == 0:  # report debug image every "debug_interval" mini-batches
-
-                for n, (sound_path, inp, pred, label) in enumerate(zip(sound_paths, inputs, predicted, labels)):
-                    sound, sample_rate = torchaudio.load(sound_path, normalize=True)
-                    series = 'label_{}_pred_{}'.format(classes[label.cpu()], classes[pred.cpu()])
-                    tensorboard_writer.add_audio('Test audio samples/{}_{}_{}'.format(idx, n, series),
-                                                 sound.reshape(1, -1), epoch, int(sample_rate))
-                    tensorboard_writer.add_image('Test MelSpectrogram samples/{}_{}_{}'.format(idx, n, series),
-                                                 plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), epoch)
+            # if epoch % debug_interval == 0:  # report debug image every "debug_interval" mini-batches
+            #
+            #     for n, (sound_path, inp, pred, label) in enumerate(zip(sound_paths, inputs, predicted, labels)):
+            #         sound, sample_rate = torchaudio.load(sound_path, normalize=True)
+            #         series = 'label_{}_pred_{}'.format(classes[label.cpu()], classes[pred.cpu()])
+            #         tensorboard_writer.add_audio('Test audio samples/{}_{}_{}'.format(idx, n, series),
+            #                                      sound.reshape(1, -1), epoch, int(sample_rate))
+            #         tensorboard_writer.add_image('Test MelSpectrogram samples/{}_{}_{}'.format(idx, n, series),
+            #                                      plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), epoch)
 
     confusion_matrix = ConfusionMatrixDisplay.from_predictions(all_labels, all_predictions)
     task.get_logger().report_matplotlib_figure(
@@ -168,7 +184,7 @@ def test_model(model, epoch):
 
 
 log_interval = 1  # In steps
-debug_interval = 5  # In epochs
+debug_interval = 5 * len(train_loader)  # In steps
 for epoch in range(configuration_dict.get('number_of_epochs', 10)):
     train(model, epoch)
     test_model(model, epoch)
