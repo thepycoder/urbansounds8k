@@ -9,7 +9,9 @@ import torchaudio
 import torch
 from clearml import Task, Dataset
 
-task = Task.init(project_name='Audio Classification',
+import global_config
+
+task = Task.init(project_name=global_config.PROJECT_NAME,
                  task_name='preprocessing')
 
 # Let's preprocess the data and create a new ClearML dataset from it, so we can track it around
@@ -60,7 +62,7 @@ class DataSetBuilder:
         }
         task.connect(self.configuration)
 
-        self.original_dataset = Dataset.get(dataset_project='Audio Classification', dataset_name='original dataset')
+        self.original_dataset = Dataset.get(dataset_project=global_config.PROJECT_NAME, dataset_name='original dataset')
         # This will return the pandas dataframe we added in the previous task
         self.metadata = Task.get_task(task_id=self.original_dataset.id).artifacts['metadata'].get()
         # This will download the data and return a local path to the data
@@ -92,7 +94,7 @@ class DataSetBuilder:
         # Providing the parent dataset allows us to keep a clear lineage of our data
         dataset = Dataset.create(
             dataset_name='preprocessed dataset',
-            dataset_project='Audio Classification',
+            dataset_project=global_config.PROJECT_NAME,
             parent_datasets=[self.original_dataset.id]
         )
         dataset_task = Task.get_task(dataset.id)

@@ -2,7 +2,9 @@ import pandas as pd
 from pathlib import Path
 from clearml import Task, Dataset, StorageManager
 
-task = Task.init(project_name='Audio Classification',
+import global_config
+
+task = Task.init(project_name=global_config.PROJECT_NAME,
                  task_name='download data')
 
 configuration = {
@@ -65,7 +67,7 @@ def build_clearml_dataset():
     # in other tasks as well as on different machines
     dataset = Dataset.create(
         dataset_name='original dataset',
-        dataset_project='Audio Classification'
+        dataset_project=global_config.PROJECT_NAME
     )
     # TODO: confusing naming
     # TODO: Add add_metadata to SDK as a wrapperish for upload_artifact
