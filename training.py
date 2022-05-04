@@ -32,10 +32,10 @@ configuration_dict = {
     'dropout': 0.15,
     'base_lr': 0.002,
     'number_of_epochs': 10,
-    'training_batch_size': 64,
-    'testing_batch_size': 64,
+    'training_batch_size': 20,
+    'testing_batch_size': 50,
     'dataset_tag': 'subset',
-    'seed': 1337,
+    'seed': 69,
     'log_interval': 1,  # In steps
     'debug_interval': 5,  # In epochs, will be converted to steps by multiplication
     'classes': ['air_conditioner', 'car_horn', 'children_playing', 'dog_bark', 'drilling',
@@ -68,6 +68,7 @@ class ClearMLDataSet(TorchDataset):
             dataset_name='preprocessed dataset',
             dataset_tags=[configuration_dict['dataset_tag']]
         )
+        print(f'Using dataset ID {clearml_dataset.id}')
         task.add_tags(clearml_dataset.tags)
         self.img_dir = clearml_dataset.get_local_copy()
         self.img_metadata = Task.get_task(task_id=clearml_dataset.id).artifacts['metadata'].get()
@@ -144,6 +145,7 @@ def plot_signal(signal, title, cmap=None):
 def train(model, criterion, epoch, train_loader, optimizer):
     """Train the model."""
     model.train()
+    iteration = 0
     for batch_idx, (_, inputs, labels) in enumerate(train_loader):
         inputs = inputs.to(device)
         labels = labels.to(device)
@@ -173,8 +175,10 @@ def train(model, criterion, epoch, train_loader, optimizer):
                 tensorboard_writer.add_image('Train MelSpectrogram samples/{}_{}_{}'.format(batch_idx, n, series),
                                              plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), iteration)
 
+    return iteration
 
-def eval_model(model, test_loader, epoch):
+
+def eval_model(model, test_loader, iteration):
     """Evaluate model performance on test set."""
     model.eval()
     all_predictions = []
@@ -191,25 +195,28 @@ def eval_model(model, test_loader, epoch):
                 all_predictions.append(int(pred))
                 all_labels.append(int(label))
 
-            # if epoch % debug_interval == 0:  # report debug image every "debug_interval" mini-batches
-            #
-            #     for n, (sound_path, inp, pred, label) in enumerate(zip(sound_paths, inputs, predicted, labels)):
-            #         sound, sample_rate = torchaudio.load(sound_path, normalize=True)
-            #         series = 'label_{}_pred_{}'.format(classes[label.cpu()], classes[pred.cpu()])
-            #         tensorboard_writer.add_audio('Test audio samples/{}_{}_{}'.format(idx, n, series),
-            #                                      sound.reshape(1, -1), epoch, int(sample_rate))
-            #         tensorboard_writer.add_image('Test MelSpectrogram samples/{}_{}_{}'.format(idx, n, series),
-            #                                      plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), epoch)
+            if iteration % configuration_dict['debug_interval'] == 0:
+                for n, (sound_path, inp, pred, label) in enumerate(zip(sound_paths, inputs, predicted, labels)):
+                    sound, sample_rate = torchaudio.load(sound_path, normalize=True)
+                    series = 'label_{}_pred_{}'.format(configuration_dict['classes'][label.cpu()],
+                                                       configuration_dict['classes'][pred.cpu()])
+                    tensorboard_writer.add_audio('Test audio samples/{}_{}_{}'.format(idx, n, series),
+                                                 sound.reshape(1, -1), iteration, int(sample_rate))
+                    tensorboard_writer.add_image('Test MelSpectrogram samples/{}_{}_{}'.format(idx, n, series),
+                                                 plot_signal(inp.cpu().numpy().squeeze(), series, 'hot'), iteration)
 
     confusion_matrix = ConfusionMatrixDisplay.from_predictions(all_labels, all_predictions)
     task.get_logger().report_matplotlib_figure(
         title='Confusion Matrix',
-        series=str(epoch),
+        series=str(iteration),
         figure=confusion_matrix.figure_,
-        iteration=epoch
+        iteration=iteration
     )
-    tensorboard_writer.add_scalar('f1_score/total',
-                                  f1_score(all_labels, all_predictions, average='weighted'), epoch)
+    tensorboard_writer.add_scalar(
+        'f1_score/total',
+        f1_score(all_labels, all_predictions, average='weighted'),
+        iteration
+    )
 
 
 def main():
@@ -218,17 +225,17 @@ def main():
     model, scheduler, optimizer, criterion = get_model()
 
     for epoch in range(configuration_dict.get('number_of_epochs')):
-        train(
-            model=model,
-            criterion=criterion,
-            epoch=epoch,
-            train_loader=train_loader,
-            optimizer=optimizer,
-        )
+        iteration = train(
+                        model=model,
+                        criterion=criterion,
+                        epoch=epoch,
+                        train_loader=train_loader,
+                        optimizer=optimizer,
+                    )
         eval_model(
             model=model,
             test_loader=test_loader,
-            epoch=epoch
+            iteration=iteration
         )
         scheduler.step()
 
