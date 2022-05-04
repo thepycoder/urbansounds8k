@@ -35,7 +35,7 @@ configuration_dict = {
     'training_batch_size': 20,
     'testing_batch_size': 50,
     'dataset_tag': 'subset',
-    'seed': 69,
+    'seed': 69,  # Nice
     'log_interval': 1,  # In steps
     'debug_interval': 5,  # In epochs, will be converted to steps by multiplication
     'classes': ['air_conditioner', 'car_horn', 'children_playing', 'dog_bark', 'drilling',
