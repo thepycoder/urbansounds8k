@@ -11,8 +11,11 @@ from clearml import Task, Dataset
 
 import global_config
 
-task = Task.init(project_name=global_config.PROJECT_NAME,
-                 task_name='preprocessing')
+task = Task.init(
+    project_name=global_config.PROJECT_NAME,
+    task_name='preprocessing',
+    reuse_last_task_id=False
+)
 
 # Let's preprocess the data and create a new ClearML dataset from it, so we can track it around
 # The cool thing is, we can easily debug, by using, you guessed it: debug samples! We can log both

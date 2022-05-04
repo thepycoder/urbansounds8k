@@ -7,7 +7,8 @@ import global_config
 task = Task.init(
     project_name=global_config.PROJECT_NAME,
     task_name='download data',
-    task_type='data_processing'
+    task_type='data_processing',
+    reuse_last_task_id=False
 )
 
 configuration = {
@@ -16,6 +17,8 @@ configuration = {
     'dataset_tag': 'full dataset'
 }
 task.connect(configuration)
+
+task.add_tags([configuration['dataset_tag']])
 
 
 def get_urbansound8k():
@@ -79,12 +82,8 @@ def build_clearml_dataset():
         dataset_project=global_config.PROJECT_NAME,
         dataset_tags=[configuration['dataset_tag']]
     )
-    # TODO: confusing naming
-    # TODO: Add add_metadata to SDK as a wrapperish for upload_artifact
     # Add the local files we downloaded earlier
     dataset.add_files(path_to_urbansound8k_audio)
-    # Add the metadata in pandas format, we can now see it in the webUI and have it be easily accessible
-    # TODO: change this to dataset.upload_metadata, only sectioning will have a prefix on the artifact
     # A dataset is a task like any other, so we can add plots and artifacts etc. to it. But to do that we need to get
     # the underlying task object first.
     dataset_task = Task.get_task(task_id=dataset.id)
