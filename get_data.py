@@ -24,8 +24,10 @@ def get_urbansound8k():
     if configuration['dataset_tag'] == 'subset':
         path_to_urbansound8k = StorageManager.get_local_copy(
             "https://allegro-datasets.s3.amazonaws.com/clearml/UrbanSound8K.zip",
-            extract_archive=True)
+            extract_archive=True
+        )
     else:
+        # Here we have already downloaded the full size dataset to a local folder from the link above
         path_to_urbansound8k = Path('/home/victor/Projects/clearML/urbansounds/full_dataset/')
     path_to_urbansound8k_csv = Path(path_to_urbansound8k) / 'UrbanSound8K' / 'metadata' / 'UrbanSound8K.csv'
     path_to_urbansound8k_audio = Path(path_to_urbansound8k) / 'UrbanSound8K' / 'audio'
